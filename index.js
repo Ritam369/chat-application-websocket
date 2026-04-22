@@ -2,6 +2,7 @@ import http from "node:http";
 import { Server } from "socket.io";
 import path from "node:path";
 import express from "express";
+import { randomUUID } from "node:crypto";
 import "dotenv/config";
 
 function getTimeHHMM() {
@@ -21,23 +22,50 @@ async function main() {
   const ioServer = new Server();
   ioServer.attach(server);
 
+  // messageId → { senderId: socketId, seenBy: Set<socketId> }
+  const seenTracker = new Map();
+
+  function checkAllSeen(messageId) {
+    const entry = seenTracker.get(messageId);
+    if (!entry) return;
+
+    const otherSockets = [...ioServer.sockets.sockets.keys()].filter(
+      (id) => id !== entry.senderId
+    );
+
+    // Only emit tick if there's at least one other socket and all have seen it
+    if (otherSockets.length > 0 && otherSockets.every((id) => entry.seenBy.has(id))) {
+      ioServer.to(entry.senderId).emit("server-message-seen", { messageId });
+      seenTracker.delete(messageId);
+    }
+  }
+
   ioServer.on("connection", (socket) => {
     console.log("a new socket has connected", socket.id);
 
     socket.on("user-message", (data) => {
       console.log("Received message:", data);
+      const messageId = randomUUID();
       const messagePayload = {
+        messageId,
         text: data?.text ?? "",
         timestamp: getTimeHHMM(),
         senderId: socket.id,
       };
+      seenTracker.set(messageId, { senderId: socket.id, seenBy: new Set() });
       ioServer.emit("server-message", messagePayload);
     });
 
     //client sends → { text }
-    // server receives → adds timestamp + senderId → broadcasts { text, timestamp, senderId }
-    // client receives → server-message with all 3 fields
+    // server receives → adds messageId + timestamp + senderId → broadcasts { messageId, text, timestamp, senderId }
+    // client receives → server-message with all 4 fields
 
+    socket.on("user-seen", ({ messageId }) => {
+      const entry = seenTracker.get(messageId);
+      if (!entry || entry.senderId === socket.id) return;
+      entry.seenBy.add(socket.id);
+      checkAllSeen(messageId);
+    });
 
     socket.on("user-typing", () => {
       socket.broadcast.emit("server-user-typing", { socketId: socket.id });
@@ -45,6 +73,10 @@ async function main() {
 
     socket.on("disconnect", () => {
       console.log("user disconnected");
+      // Re-check all tracked messages — disconnected socket may have been the last blocker
+      for (const messageId of seenTracker.keys()) {
+        checkAllSeen(messageId);
+      }
     });
   });
 

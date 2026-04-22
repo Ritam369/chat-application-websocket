@@ -181,6 +181,32 @@
             color: var(--bg);
             cursor: not-allowed;
         }
+
+        .message__meta {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 4px;
+        }
+
+        .tick {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            opacity: 0;
+            transform: scale(0.5);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        .tick--visible {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .tick svg {
+            width: 100%;
+            height: 100%;
+        }
     </style>
 </head>
 <body>
@@ -225,8 +251,13 @@
 
             if(data.text) {
                 const messageType = data.senderId === socket.id ? 'sent' : 'received';
-                appendMessage(data.text, messageType, data.timestamp, data.senderId);
+                appendMessage(data.text, messageType, data.timestamp, data.senderId, data.messageId);
             }
+        });
+
+        socket.on("server-message-seen", ({ messageId }) => {
+            const el = document.querySelector(`[data-message-id="${messageId}"]`);
+            if (el) el.querySelector('.tick')?.classList.add('tick--visible');
         });
 
         const form = document.getElementById('chat-form');
@@ -261,9 +292,22 @@
             return '#' + id.slice(-4).toUpperCase();
         }
 
-        function appendMessage(text, type, timestamp = '', senderId = '') {
+        const seenObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) return;
+                const { messageId, senderId } = entry.target.dataset;
+                if (senderId !== socket.id) {
+                    socket.emit('user-seen', { messageId });
+                }
+                seenObserver.unobserve(entry.target);
+            });
+        }, { threshold: 0.8 });
+
+        function appendMessage(text, type, timestamp = '', senderId = '', messageId = '') {
             const message = document.createElement('div');
             message.className = `message ${type === 'sent' ? 'message--sent' : 'message--received'}`;
+            if (messageId) message.dataset.messageId = messageId;
+            if (senderId) message.dataset.senderId = senderId;
 
             if (type === 'received' && senderId) {
                 const sender = document.createElement('div');
@@ -278,11 +322,25 @@
 
             const meta = document.createElement('div');
             meta.className = 'message__meta';
-            meta.textContent = timestamp;
-            message.appendChild(meta);
 
+            const timeSpan = document.createElement('span');
+            timeSpan.textContent = timestamp;
+            meta.appendChild(timeSpan);
+
+            if (type === 'sent' && messageId) {
+                const tick = document.createElement('span');
+                tick.className = 'tick';
+                tick.innerHTML = `<svg viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><polyline points="1.5,6 4.5,9 10.5,3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+                meta.appendChild(tick);
+            }
+
+            message.appendChild(meta);
             messages.appendChild(message);
             messages.scrollTop = messages.scrollHeight;
+
+            if (type === 'received' && messageId) {
+                seenObserver.observe(message);
+            }
         }
 
         function emitTypingDebounced() {

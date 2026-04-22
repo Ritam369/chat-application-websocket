@@ -13,3 +13,13 @@
 - While typing, client emits debounced `socket.emit("user-typing", ...)`.
 - Server catches `socket.on("user-typing")` and broadcasts to others only with `socket.broadcast.emit("server-user-typing", { socketId })`.
 - Other clients catch `socket.on("server-user-typing")`, that shows typing indicator.
+
+## Message seen tick flow
+
+- Server assigns a `messageId` (UUID) to every message and stores it in `seenTracker` Map: `messageId → { senderId, seenBy: Set<socketId> }`.
+- Receiver's `IntersectionObserver` fires when 80% of a received message bubble is in view → emits `socket.emit("user-seen", { messageId })`.
+- Server catches `socket.on("user-seen")`, adds the viewer's socketId to `seenBy`, then checks if every other connected socket (excluding sender) has seen it.
+- If yes → `ioServer.to(senderId).emit("server-message-seen", { messageId })` is emitted only to the original sender.
+- Sender catches `socket.on("server-message-seen")`, finds the message element by `data-message-id`, and adds `.tick--visible` → tick animates in.
+- No tick if only one socket is connected, or not all others have seen it yet.
+- On `disconnect`, server re-runs the seen check — if the disconnected socket was the last blocker, tick fires for the sender.
