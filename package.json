@@ -1,0 +1,13 @@
+{
+  "name": "chat-application-websocket",
+  "module": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch index.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  }
+}

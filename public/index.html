@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Application using WebSocket</title>
+    <style>
+        :root {
+            --bg: #09090b;
+            --surface: #18181b;
+            --surface-2: #27272a;
+            --muted: #a1a1aa;
+            --text-soft: #d4d4d8;
+            --text-mid: #e4e4e7;
+            --text: #fafafa;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+            display: grid;
+            place-items: center;
+            padding: 20px;
+        }
+
+        .chat {
+            width: min(760px, 100%);
+            height: min(760px, 90vh);
+            background: var(--surface);
+            border: 1px solid var(--surface-2);
+            border-radius: 16px;
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            overflow: hidden;
+        }
+
+        .chat__header {
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--surface-2);
+            background: var(--surface-2);
+        }
+
+        .chat__title {
+            margin: 0;
+            font-size: 1rem;
+            color: var(--text);
+        }
+
+        .chat__subtitle {
+            margin: 4px 0 0;
+            font-size: 0.85rem;
+            color: var(--text-soft);
+        }
+
+        .chat__messages {
+            padding: 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .message {
+            max-width: 80%;
+            border-radius: 12px;
+            padding: 10px 12px;
+            line-height: 1.35;
+            font-size: 0.95rem;
+            border: 1px solid var(--surface-2);
+        }
+
+        .message--received {
+            align-self: flex-start;
+            background: var(--surface-2);
+            color: var(--text);
+        }
+
+        .message--sent {
+            align-self: flex-end;
+            background: var(--text-mid);
+            color: var(--bg);
+            border-color: var(--text-mid);
+        }
+
+        .message__meta {
+            margin-top: 4px;
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        .chat__typing {
+            min-height: 28px;
+            padding: 0 14px 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            color: var(--muted);
+        }
+
+        .typing-dots {
+            display: none;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .typing-dots.visible {
+            display: flex;
+        }
+
+        .typing-dots span {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--muted);
+            animation: bounce 1.2s infinite ease-in-out;
+        }
+
+        .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes bounce {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-5px); }
+        }
+
+        .message__sender {
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: var(--muted);
+            margin-bottom: 3px;
+        }
+
+        .chat__composer {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 10px;
+            padding: 14px;
+            border-top: 1px solid var(--surface-2);
+            background: var(--surface);
+        }
+
+        .chat__input {
+            width: 100%;
+            border: 1px solid var(--surface-2);
+            border-radius: 10px;
+            padding: 11px 12px;
+            background: var(--bg);
+            color: var(--text);
+            outline: none;
+        }
+
+        .chat__input::placeholder {
+            color: var(--muted);
+        }
+
+        .chat__input:focus {
+            border-color: var(--text-soft);
+        }
+
+        .chat__send {
+            border: 1px solid var(--text);
+            background: var(--text);
+            color: var(--bg);
+            border-radius: 10px;
+            padding: 0 16px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .chat__send:disabled {
+            background: var(--text-soft);
+            border-color: var(--text-soft);
+            color: var(--bg);
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <main class="chat" aria-label="Chat Window">
+        <header class="chat__header">
+            <h1 class="chat__title">Simple Chat</h1>
+            <p class="chat__subtitle">WebSocket-ready UI mock</p>
+        </header>
+
+        <section class="chat__messages" id="messages" aria-live="polite">
+            <div class="message message--received">Hi! Type a message below to start chatting.</div>
+        </section>
+
+        <div class="chat__typing" id="typing-indicator" aria-live="polite">
+            <div class="typing-dots" id="typing-dots">
+                <span></span><span></span><span></span>
+            </div>
+            <span id="typing-label"></span>
+        </div>
+
+        <form class="chat__composer" id="chat-form">
+            <input
+                class="chat__input"
+                id="chat-input"
+                type="text"
+                placeholder="Type your message..."
+                autocomplete="off"
+            />
+            <button class="chat__send" id="send-button" type="submit" disabled>Send</button>
+        </form>
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const typingDebounceDelayMs = 350;
+        let typingTimerId = null;
+        let typingIndicatorTimerId = null;
+
+        socket.on("server-message", (data) => {
+            console.log("Message from server:", data);
+
+            if(data.text) {
+                const messageType = data.senderId === socket.id ? 'sent' : 'received';
+                appendMessage(data.text, messageType, data.timestamp, data.senderId);
+            }
+        });
+
+        const form = document.getElementById('chat-form');
+        const input = document.getElementById('chat-input');
+        const button = document.getElementById('send-button');
+        const messages = document.getElementById('messages');
+
+
+        const typingDots = document.getElementById('typing-dots');
+        const typingLabel = document.getElementById('typing-label');
+
+        socket.on("server-user-typing", (data) => {
+            if (data.socketId === socket.id) return;
+
+            const name = shortId(data.socketId);
+            typingLabel.textContent = `${name} is typing`;
+            typingDots.classList.add('visible');
+            clearTimeout(typingIndicatorTimerId);
+            typingIndicatorTimerId = setTimeout(() => {
+                typingDots.classList.remove('visible');
+                typingLabel.textContent = '';
+            }, 1000);
+        });
+
+        function onMessageInput(text) {
+            socket.emit("user-message", { text });
+        }
+
+        window.onMessageInput = onMessageInput;
+
+        function shortId(id) {
+            return '#' + id.slice(-4).toUpperCase();
+        }
+
+        function appendMessage(text, type, timestamp = '', senderId = '') {
+            const message = document.createElement('div');
+            message.className = `message ${type === 'sent' ? 'message--sent' : 'message--received'}`;
+
+            if (type === 'received' && senderId) {
+                const sender = document.createElement('div');
+                sender.className = 'message__sender';
+                sender.textContent = shortId(senderId);
+                message.appendChild(sender);
+            }
+
+            const content = document.createElement('div');
+            content.textContent = text;
+            message.appendChild(content);
+
+            const meta = document.createElement('div');
+            meta.className = 'message__meta';
+            meta.textContent = timestamp;
+            message.appendChild(meta);
+
+            messages.appendChild(message);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function emitTypingDebounced() {
+            clearTimeout(typingTimerId);
+            typingTimerId = setTimeout(() => {
+                socket.emit('user-typing', { socketId: socket.id });
+            }, typingDebounceDelayMs);
+        }
+
+        input.addEventListener('input', () => {
+            const message = input.value;
+            button.disabled = input.value.trim().length === 0;
+            if (message.trim().length > 0) {
+                emitTypingDebounced();
+            }
+        });
+
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            const text = input.value.trim();
+            if (!text) return;
+
+            onMessageInput(text)
+            input.value = '';
+            button.disabled = true;
+
+            // setTimeout(() => {
+            //     appendMessage(`Echo: ${text}`, 'received');
+            // }, 250);
+        });
+    </script>
+</body>
+</html>
