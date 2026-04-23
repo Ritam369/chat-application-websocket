@@ -247,6 +247,9 @@
         let typingIndicatorTimerId = null;
 
         socket.on("server-message", (data) => {
+            //on "server-message" event, by checking the senderId with the socketId
+            //'sent' or 'received' type will be set
+            //then the appendMessage() will be called to display that message
             console.log("Message from server:", data);
 
             if(data.text) {
@@ -256,6 +259,7 @@
         });
 
         socket.on("server-message-seen", ({ messageId }) => {
+            //if "server-message-seen" event comes to the client side with the messageId then that message will be marked as seen by adding the 'tick--visible' class
             const el = document.querySelector(`[data-message-id="${messageId}"]`);
             if (el) el.querySelector('.tick')?.classList.add('tick--visible');
         });
@@ -269,6 +273,8 @@
         const typingDots = document.getElementById('typing-dots');
         const typingLabel = document.getElementById('typing-label');
 
+        //On "server-user-typing", at first it will check if the typing user is not the current user as the one who is typing should not see the typing effect
+        //So other sockets can see the typingDots for 1second whenever that user is typing and it will run continuosly
         socket.on("server-user-typing", (data) => {
             if (data.socketId === socket.id) return;
 
@@ -293,6 +299,7 @@
         }
 
         const seenObserver = new IntersectionObserver((entries) => {
+            //for each connection, if the received message is seen then "user-seen" event will be emitted from the cllient side
             entries.forEach((entry) => {
                 if (!entry.isIntersecting) return;
                 const { messageId, senderId } = entry.target.dataset;
@@ -304,6 +311,10 @@
         }, { threshold: 0.8 });
 
         function appendMessage(text, type, timestamp = '', senderId = '', messageId = '') {
+            //in appendMessage(), a div will be created and based on the type, className will be set for messages
+            //to display the message and if the type is 'received', all the className, textContent and other data will be set
+            //And if the type is 'sent', a tick will be created
+            //and 'IntersectionObserver' from the receiver side will work always that fires when 80% of a received message bubble is in view
             const message = document.createElement('div');
             message.className = `message ${type === 'sent' ? 'message--sent' : 'message--received'}`;
             if (messageId) message.dataset.messageId = messageId;
@@ -351,6 +362,10 @@
         }
 
         input.addEventListener('input', () => {
+            //for the input box, if there's any input evenyt listener
+            //then it will check whether the trimmed value is empty or not
+            //if empty then button will stay disabled
+            //if not empty, then emit "user-typing" event by emitTypingDebounced()
             const message = input.value;
             button.disabled = input.value.trim().length === 0;
             if (message.trim().length > 0) {
@@ -359,6 +374,10 @@
         });
 
         form.addEventListener('submit', (event) => {
+            //Now after done with typing when one sockect/user send the message
+            //then the submit event will be triggered
+            //annd the trimmed text will be sent to the server
+            //bt emitting the "user-message" event from the client side by onMessageInput()
             event.preventDefault();
             const text = input.value.trim();
             if (!text) return;

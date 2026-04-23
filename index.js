@@ -33,7 +33,9 @@ async function main() {
       (id) => id !== entry.senderId
     );
 
-    // Only emit tick if there's at least one other socket and all have seen it
+    // Only emit tick if all other sockets have seen it
+    //If there's only one socket connection in the chat, then not tick
+    //if seen by all then for that sender socket "server-message-seen" event will be emitted
     if (otherSockets.length > 0 && otherSockets.every((id) => entry.seenBy.has(id))) {
       ioServer.to(entry.senderId).emit("server-message-seen", { messageId });
       seenTracker.delete(messageId);
@@ -44,6 +46,9 @@ async function main() {
     console.log("a new socket has connected", socket.id);
 
     socket.on("user-message", (data) => {
+      //server on "user-message" event, generates
+      // messagePayload that contains messageId, the text, timestamp and the senderId and and stores it in `seenTracker` Map
+      //and then server broadcastes the message to other connected sockets
       console.log("Received message:", data);
       const messageId = randomUUID();
       const messagePayload = {
@@ -61,12 +66,16 @@ async function main() {
     // client receives → server-message with all 4 fields
 
     socket.on("user-seen", ({ messageId }) => {
+      //on "user-seen" event, server will update the seenBy set for the message
+      //then checks if every other connected socket (excluding sender) has seen it by checkAllSeen(messageId).
       const entry = seenTracker.get(messageId);
       if (!entry || entry.senderId === socket.id) return;
       entry.seenBy.add(socket.id);
       checkAllSeen(messageId);
     });
 
+    //On "user-typing" event, server will broadcast to all other socket connections
+    //that an user is typing in the chat, by emitting "server-user-typing" event
     socket.on("user-typing", () => {
       socket.broadcast.emit("server-user-typing", { socketId: socket.id });
     });
