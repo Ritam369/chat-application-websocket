@@ -45,6 +45,10 @@ async function main() {
   ioServer.on("connection", (socket) => {
     console.log("a new socket has connected", socket.id);
 
+    setTimeout(() => {
+      ioServer.to(socket.id).emit("server-message", { text: "Hi! Welcome to this chat-room", timestamp: getTimeHHMM(), senderId: "server" })
+    },1000)
+
     socket.on("user-message", (data) => {
       //server on "user-message" event, generates
       // messagePayload that contains messageId, the text, timestamp and the senderId and and stores it in `seenTracker` Map
@@ -92,7 +96,7 @@ async function main() {
   const port = process.env.PORT || 8000;
 
   server.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+    console.log(`Server is running on http://localhost:${port}`);
   });
 }
 
